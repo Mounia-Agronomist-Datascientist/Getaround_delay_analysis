@@ -1,0 +1,43 @@
+name: Getaround_project
+
+channels:
+  - defaults
+  - conda-forge 
+
+dependencies:
+
+ # 1. Core Data Science (Installed via Conda for optimal performance/compilation)
+  - python=3.10          
+  - numpy                
+  - pandas               
+  - scikit-learn=1.3     
+  - matplotlib           
+  - plotly               
+  - seaborn              
+  - openpyxl             
+  - ipykernel            
+  - notebook             
+
+  # 2. Deployment and MLOps Tools (Installed via pip)
+  - pip
+  - pip:
+    - mlflow==2.7.1      
+    - streamlit==1.28.1  
+    - gunicorn           
+    - Pillow             
+    - boto3              
+    - psycopg2-binary    
+    - requests           
+    
+  
+  # 3. For Hugging Face
+    - transformers       
+    - accelerate         
+    - datasets           
+    - python-dotenv      
+
+
+
+  
+
+  
