@@ -16,7 +16,8 @@ dependencies:
   - seaborn              
   - openpyxl             
   - ipykernel            
-  - notebook             
+  - notebook  
+  - statsmodels       
 
   # 2. Deployment and MLOps Tools (Installed via pip)
   - pip
