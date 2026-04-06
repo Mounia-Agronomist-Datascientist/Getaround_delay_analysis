@@ -5,38 +5,60 @@ Getaround Delay Analysis - Metrics Module
 This module contains all calculation and analysis functions
 for the Getaround threshold optimization project.
 
-Author: Mounia
-Date: January 2026
 """
 
 import pandas as pd
 import numpy as np
 import plotly.express as px
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
+from plotly.graph_objects import Figure
 
 
-def load_and_prepare_data(filepath: str) -> pd.DataFrame:
+def load_and_prepare_data(
+    filepath: str, 
+    include_canceled: bool = True) -> pd.DataFrame:
     """
     Load and prepare Getaround data.
     
     Parameters:
-    -----------
-    filepath : str
-        Path to the Excel file
-        
+        filepath : str
+            Path to the Excel file
+        include_canceled : bool, default=True
+            If True, keep canceled rentals (missing delays are meaningful, they will be NaN).
+            If False, keep only ended rentals with delay info.
+            
     Returns:
-    --------
-    pd.DataFrame : Cleaned data ready for analysis
+        pd.DataFrame : Cleaned data ready for analysis
     """
     df = pd.read_excel(filepath)
     
-    # Filter only completed rentals with delay information available
-    df_clean = df[
-        (df['state'] == 'ended') & 
-        (df['delay_at_checkout_in_minutes'].notna())
-    ].copy()
+    if include_canceled:
+        df_clean = df.copy()
+    else:
+        # Keep only ended rentals with complete delay info
+        df_clean = df[
+            (df['state'] == 'ended') & 
+            (df['delay_at_checkout_in_minutes'].notna())
+        ].copy()
     
     return df_clean
+
+def separate_rental_groups(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Separate rentals into two groups based on whether they have a predecessor.
+    
+    Returns:
+        tuple : (consecutive_rentals_df, first_rentals_df)
+            - consecutive_rentals_df: rentals that follow another rental
+            (have time_delta_with_previous_rental_in_minutes)
+            - first_rentals_df: rentals without a predecessor (isolated or first in chain)
+    """
+    is_consecutive = df['time_delta_with_previous_rental_in_minutes'].notna()
+    
+    consecutive = df[is_consecutive].copy()
+    first = df[~is_consecutive].copy()
+    
+    return consecutive, first
 
 
 def calculate_risk_level(df: pd.DataFrame) -> pd.DataFrame:
@@ -55,75 +77,77 @@ def calculate_risk_level(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = df.copy()
     
-    def assign_risk(row):
-        if pd.isna(row['time_delta_with_previous_rental_in_minutes']):
-            return 'No conflict (isolated rental)'
-        elif row['delay_at_checkout_in_minutes'] > row['time_delta_with_previous_rental_in_minutes']:
-            return 'Critical (delay > time delta)'
-        elif row['delay_at_checkout_in_minutes'] > 0:
-            return 'Moderate (late but buffer absorbed)'
+    def assign_risk_level(row: pd.Series) -> str:
+        """
+        Assign risk level based on delay and buffer time.
+        
+        Categories:
+        - No consecutive rental: isolated rental (no previous_id)
+        - Critical: delay > time_delta (driver will definitely wait/cancel)
+        - High: delay > 0 AND time_delta < 120 min (tight schedule)
+        - Medium: delay > 0 AND 120 <= time_delta < 240 min
+        - Low: delay <= 0 OR time_delta >= 240 min
+        """
+        if pd.isna(row.get('time_delta_with_previous_rental_in_minutes')):
+            return 'No consecutive rental'
+        
+        delay = row.get('delay_at_checkout_in_minutes', 0)
+        time_delta = row['time_delta_with_previous_rental_in_minutes']
+        
+        if delay > time_delta:
+            return 'Critical (delay > buffer)'
+        elif delay > 0 and time_delta < 120:
+            return 'High (delay + buffer < 2h)'
+        elif delay > 0 and 120 <= time_delta < 240:
+            return 'Medium (delay + buffer 2-4h)'
         else:
-            return 'Low (on time or early)'
+            return 'Low (on-time or large buffer)'
     
-    df['risk_level'] = df.apply(assign_risk, axis=1)
+    df['risk_level'] = df.apply(assign_risk_level, axis=1)
     return df
+
 
 
 def calculate_threshold_impact(
     df: pd.DataFrame, 
     threshold: int, 
-    checkin_type: Optional[str] = None
-) -> Dict[str, float]:
+    checkin_type: Optional[str] = None) -> Dict[str, float]:
     """
     Calculate the impact of a given threshold on conflicts and rentals.
     
-    Parameters:
-    -----------
-    df : pd.DataFrame
-        DataFrame with prepared data
-    threshold : int
-        Minimum threshold in minutes between two rentals
-    checkin_type : str, optional
-        'mobile' or 'connect' to filter. None = all types
-        
-    Returns:
-    --------
-    dict : Dictionary containing the following metrics:
-        - threshold: applied threshold
-        - total_rentals: total number of rentals
-        - total_critical: total number of critical conflicts
-        - conflicts_resolved: number of conflicts resolved by the threshold
-        - pct_resolved: % of critical conflicts resolved
-        - rentals_blocked: number of rentals that would be blocked
-        - pct_blocked: % of rentals blocked out of total
-        - efficiency: ratio (conflicts resolved / rentals blocked)
-        
-    Example:
-    --------
-    >>> metrics = calculate_threshold_impact(df, threshold=90)
-    >>> print(f"Conflicts resolved: {metrics['pct_resolved']:.1f}%")
+    Note: This correctly includes canceled rentals in the denominator,
+    as these represent the real impact on user experience.
     """
-    # Filter by type if specified
+    if 'risk_level' not in df.columns:
+        raise ValueError("Column 'risk_level' is required. Run calculate_risk_level() first.")
+    
     subset = df.copy()
     if checkin_type is not None:
         subset = subset[subset['checkin_type'] == checkin_type]
     
-    # Basic calculations
-    total_rentals = len(subset)
-    total_critical = len(subset[subset['risk_level'] == 'Critical (delay > time delta)'])
+    # Total rentals = ALL consecutive rentals (canceled + ended)
+    total_rentals = len(subset[
+        subset['time_delta_with_previous_rental_in_minutes'].notna()
+    ])
     
-    # Conflicts that would be resolved with this threshold
+    # Critical conflicts = ended rentals where delay > time_delta
+    total_critical = len(subset[
+        (subset['state'] == 'ended') &
+        (subset['risk_level'] == 'Critical (delay > buffer)')
+    ])
+    
+    # Conflicts resolved by threshold
     resolved = len(subset[
-        (subset['risk_level'] == 'Critical (delay > time delta)') & 
+        (subset['state'] == 'ended') &
+        (subset['risk_level'] == 'Critical (delay > buffer)') & 
         (subset['time_delta_with_previous_rental_in_minutes'] < threshold)
     ])
     
-    # Rentals that would be blocked with this threshold
+    # Rentals blocked
     blocked = len(subset[
-        subset['time_delta_with_previous_rental_in_minutes'].notna() &
-        (subset['time_delta_with_previous_rental_in_minutes'] < threshold)
+        subset['time_delta_with_previous_rental_in_minutes'] < threshold
     ])
-    
+ 
     # Percentage calculations
     pct_resolved = (resolved / total_critical * 100) if total_critical > 0 else 0
     pct_blocked = (blocked / total_rentals * 100) if total_rentals > 0 else 0
@@ -185,7 +209,7 @@ def plot_threshold_efficiency(
     df: pd.DataFrame,
     thresholds: List[int] = [0, 30, 60, 90, 120, 150, 180, 240],
     show_global: bool = True
-) -> px.line:
+) -> Figure:
     """
     Generate an interactive chart of threshold efficiency.
     
@@ -232,6 +256,57 @@ def plot_threshold_efficiency(
             xanchor="right",
             x=1
         )
+    )
+    
+    return fig
+
+def plot_delay_vs_buffer(
+    df: pd.DataFrame,
+    title: str = "Delay vs Buffer Time",
+    xlim: Tuple[int, int] = (0, 900)
+) -> Figure:
+    """
+    Interactive scatter plot: time_delta vs delay, colored by risk level.
+    
+    PREREQUISITE: df must have 'risk_level' column.
+    If missing, it will be calculated automatically.
+    """
+    if 'risk_level' not in df.columns:
+        df = calculate_risk_level(df)
+
+    df_plot = df[
+        (df['time_delta_with_previous_rental_in_minutes'].notna()) &
+        (df['delay_at_checkout_in_minutes'].notna())
+    ].copy()
+    
+    color_map = {
+        'Critical (delay > buffer)': '#e74c3c',  # Red
+        'High (delay + buffer < 2h)': '#f39c12',  # Orange
+        'Medium (delay + buffer 2-4h)': '#95a5a6',  # Gray
+        'Low (on-time or large buffer)': '#27ae60'  # Green
+    }
+    
+    fig = px.scatter(
+        df_plot,
+        x='time_delta_with_previous_rental_in_minutes',
+        y='delay_at_checkout_in_minutes',
+        color='risk_level',
+        color_discrete_map=color_map,
+        title=title,
+        labels={
+            'time_delta_with_previous_rental_in_minutes': 'Buffer Time (minutes)',
+            'delay_at_checkout_in_minutes': 'Delay at Checkout (minutes)'
+        },
+        hover_data=['checkin_type', 'state']
+    )
+    
+    # Add critical line
+    fig.add_shape(
+        type="line",
+        x0=0, x1=xlim[1],
+        y0=0, y1=xlim[1],
+        line=dict(color="#e74c3c", dash="dash", width=2),
+        name="Critical line (delay = buffer)"
     )
     
     return fig
@@ -305,7 +380,7 @@ def get_optimal_threshold(
     df: pd.DataFrame,
     thresholds: List[int] = [0, 30, 60, 90, 120, 150, 180, 240],
     metric: str = 'efficiency'
-) -> Dict[str, any]:
+) -> Dict[str, Any]:
     """
     Identify the optimal threshold according to a given criterion.
     
