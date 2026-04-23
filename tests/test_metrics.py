@@ -1,8 +1,5 @@
 """
-SIMPLE TESTS FOR metrics.py
-===========================
-
-ESSENTIAL tests
+ESSENTIAL tests for metrics.py
 
 Installation:
     pip install pytest pandas
@@ -26,9 +23,7 @@ from metrics import (
 )
 
 
-# ============================================================================
-# FIXTURES - Reusable test data
-# ============================================================================
+# FIXTURES =========================================================================
 
 @pytest.fixture
 def sample_data():
@@ -55,9 +50,8 @@ def df_with_risk(consecutive_rentals):
     return calculate_risk_level(consecutive_rentals)
 
 
-# ============================================================================
-# ESSENTIAL TESTS - The 5 tests that really matter
-# ============================================================================
+
+# ESSENTIAL TESTS ====================================================================
 
 class TestCalculateRiskLevel:
     """Test the calculate_risk_level() function"""
@@ -72,6 +66,7 @@ class TestCalculateRiskLevel:
         result = calculate_risk_level(consecutive_rentals)
         assert isinstance(result, pd.DataFrame), "The function does not return a DataFrame"
     
+
     def test_critical_case(self):
         """Verify that delay > time_delta is categorized as 'Critical'"""
         df = pd.DataFrame({
@@ -79,8 +74,9 @@ class TestCalculateRiskLevel:
             'time_delta_with_previous_rental_in_minutes': [100.0]
         })
         result = calculate_risk_level(df)
+        
         assert result['risk_level'].iloc[0] == 'Critical (delay > buffer)', \
-            "Critical case not correctly categorized"
+            "Delay > buffer should be 'Critical', got: " + result['risk_level'].iloc[0]
 
 
 class TestCalculateThresholdImpact:
@@ -131,9 +127,8 @@ class TestWorkflow:
         assert len(results) > 0, "No simulation results returned"
 
 
-# ============================================================================
-# EXECUTION
-# ============================================================================
+
+# EXECUTION =================================================================
 
 if __name__ == '__main__':
     # Run with: python -m pytest test_metrics_simple.py -v

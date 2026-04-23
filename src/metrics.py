@@ -228,34 +228,25 @@ def plot_threshold_efficiency(
     """
     results_df = simulate_thresholds(df, thresholds)
     
-    # Filter if we don't want to show the global view
-    if not show_global:
-        results_df = results_df[results_df['checkin_type'] != 'all']
+    results_df = results_df.sort_values(['checkin_type', 'threshold'])
     
     fig = px.line(
         results_df,
         x='threshold',
         y='efficiency',
         color='checkin_type',
-        title='📊 Threshold Efficiency by Check-in Type',
+        markers=True,
+        title='Threshold Efficiency by Check-in Type',
         labels={
             'threshold': 'Minimum Threshold (minutes)',
-            'efficiency': 'Ratio: Conflicts Resolved / Rentals Blocked',
+            'efficiency': 'Efficiency Ratio',
             'checkin_type': 'Check-in Type'
-        },
-        markers=True
+        }
     )
     
     fig.update_layout(
         hovermode='x unified',
-        legend=dict(
-            title="Check-in Type",
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1
-        )
+        height=500
     )
     
     return fig
@@ -435,18 +426,18 @@ def generate_summary_report(df: pd.DataFrame, threshold: int) -> str:
     metrics = calculate_threshold_impact(df, threshold)
     
     report = f"""
-    📊 IMPACT REPORT - {threshold}-MINUTE THRESHOLD
+    IMPACT REPORT - {threshold}-MINUTE THRESHOLD
     {'='*60}
     
-    🎯 BENEFITS
+    BENEFITS
     • Critical conflicts resolved: {metrics['conflicts_resolved']} / {metrics['total_critical']}
     • Resolution rate: {metrics['pct_resolved']:.1f}%
     
-    💰 COSTS
+    COSTS
     • Rentals blocked: {metrics['rentals_blocked']} / {metrics['total_rentals']}
     • Impact on volume: {metrics['pct_blocked']:.2f}%
     
-    ⚖️ EFFICIENCY
+    EFFICIENCY
     • Benefit/cost ratio: {metrics['efficiency']:.2f}
     • For each rental blocked, we resolve {metrics['efficiency']:.2f} conflicts
     
@@ -457,7 +448,7 @@ def generate_summary_report(df: pd.DataFrame, threshold: int) -> str:
 
 
 # Utility function for exploratory data analysis
-def get_data_summary(df: pd.DataFrame) -> Dict[str, any]:
+def get_data_summary(df: pd.DataFrame) -> Dict[str, Any]:
     """
     Return a summary of the data for EDA.
     
