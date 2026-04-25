@@ -30,8 +30,12 @@ Thumbs.db
 
 # Temporary files
 *.log
-*.csv
 output/
 
-# DATA
-/DATA
+# ========== DATA FOLDER STRATEGY ==========
+# we don't keep intermediate files
+DATA/processed_data/*
+
+
+# we keep raw data for streamlit
+!DATA/raw_data/
